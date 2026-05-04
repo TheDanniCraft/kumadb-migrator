@@ -17,6 +17,7 @@ MARIADB_PASSWORD = getenv("MARIADB_PASSWORD", "secret")
 MARIADB_HOST = getenv("MARIADB_HOST", "localhost")
 MARIADB_PORT = int(getenv("MARIADB_PORT", "3306"))
 MARIADB_DATABASE = getenv("MARIADB_DATABASE", "kumadb")
+SQLITE_DB_PATH = getenv("SQLITE_DB", "/app/kuma.db")
 IGNORE_INSERT_ERRORS = getenv("IGNORE_INSERT_ERRORS", "0") == "1"
 DRY_RUN = getenv("DRY_RUN", "0") == "1"
 
@@ -468,6 +469,18 @@ def migrate_table(table_name):
     copy_rows(table_name, escaped_table_name)
 
 
+def get_sqlite_row_count(table_name: str) -> int:
+    """Return the row count for a table in the SQLite source database."""
+    DB["sqlite_cursor"].execute(f"SELECT COUNT(*) FROM `{table_name}`")
+    return DB["sqlite_cursor"].fetchone()[0]
+
+
+def get_mysql_row_count(table_name: str) -> int:
+    """Return the row count for a table in the MariaDB/MySQL destination database."""
+    DB["mysql_cursor"].execute(f"SELECT COUNT(*) FROM `{table_name}`")
+    return DB["mysql_cursor"].fetchone()[0]
+
+
 def migrate_sqlite_to_mysql(sqlite_db_path, mysql_config):
     """
     Migrates a SQLite database to MySQL, including table schemas and data.
@@ -485,8 +498,7 @@ def migrate_sqlite_to_mysql(sqlite_db_path, mysql_config):
             print("\n==> DRY_RUN=1: connectivity OK, listing source tables only. No data migrated.")
             for table_name_tuple in tables:
                 tname = table_name_tuple[0]
-                DB["sqlite_cursor"].execute(f"SELECT COUNT(*) FROM `{tname}`")
-                count = DB["sqlite_cursor"].fetchone()[0]
+                count = get_sqlite_row_count(tname)
                 print(f"  {tname}: {count} rows")
             return
 
@@ -505,10 +517,8 @@ def migrate_sqlite_to_mysql(sqlite_db_path, mysql_config):
             ):
                 continue
             try:
-                DB["sqlite_cursor"].execute(f"SELECT COUNT(*) FROM `{tname}`")
-                src_count = DB["sqlite_cursor"].fetchone()[0]
-                DB["mysql_cursor"].execute(f"SELECT COUNT(*) FROM `{tname}`")
-                dst_count = DB["mysql_cursor"].fetchone()[0]
+                src_count = get_sqlite_row_count(tname)
+                dst_count = get_mysql_row_count(tname)
                 match = "✓" if src_count == dst_count else "✗"
                 if src_count != dst_count:
                     all_match = False
@@ -550,7 +560,7 @@ def migrate_sqlite_to_mysql(sqlite_db_path, mysql_config):
 
 
 # --- Configuration ---
-SQLITE_DB = '/app/kuma.db'
+SQLITE_DB = SQLITE_DB_PATH
 mysql_connection_config = {
     'host': MARIADB_HOST,
     'port': MARIADB_PORT,

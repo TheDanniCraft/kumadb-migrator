@@ -64,16 +64,17 @@ docker run --rm \
 
 ## Environment variables
 
-| Variable               | Required | Default     | Description                                                                 |
-|------------------------|----------|-------------|-----------------------------------------------------------------------------|
-| `MARIADB_USER`         | yes      | —           | MariaDB user name                                                           |
-| `MARIADB_PASSWORD`     | yes      | —           | MariaDB password                                                            |
-| `MARIADB_HOST`         | no       | `localhost` | Target host. Set to a remote hostname to enable remote mode.                |
-| `MARIADB_PORT`         | no       | `3306`      | Target port                                                                 |
-| `MARIADB_DATABASE`     | no       | `kumadb`    | Target database name                                                        |
-| `FORCE`                | no       | `0`         | Set to `1` to migrate into a non-empty destination database                 |
-| `DRY_RUN`              | no       | `0`         | Set to `1` to check connectivity and list source tables without migrating   |
-| `IGNORE_INSERT_ERRORS` | no       | `0`         | Set to `1` to skip rows that fail to insert (default is to abort on error)  |
+| Variable               | Required | Default          | Description                                                                 |
+|------------------------|----------|------------------|-----------------------------------------------------------------------------|
+| `MARIADB_USER`         | yes      | —                | MariaDB user name                                                           |
+| `MARIADB_PASSWORD`     | yes      | —                | MariaDB password                                                            |
+| `MARIADB_HOST`         | no       | `localhost`      | Target host. Set to a remote hostname to enable remote mode.                |
+| `MARIADB_PORT`         | no       | `3306`           | Target port                                                                 |
+| `MARIADB_DATABASE`     | no       | `kumadb`         | Target database name                                                        |
+| `SQLITE_DB`            | no       | `/app/kuma.db`   | Path to the SQLite source database inside the container                     |
+| `FORCE`                | no       | `0`              | Set to `1` to migrate into a non-empty destination database                 |
+| `DRY_RUN`              | no       | `0`              | Set to `1` to check connectivity and list source tables without migrating   |
+| `IGNORE_INSERT_ERRORS` | no       | `0`              | Set to `1` to skip rows that fail to insert (default is to abort on error)  |
 
 ## Acknowledgements
 
