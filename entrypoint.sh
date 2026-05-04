@@ -29,7 +29,7 @@ echo "    User:     ${MARIADB_USER}"
 
 # Determine mode: remote if host is not localhost / 127.0.0.1
 IS_REMOTE=false
-if [ "${MARIADB_HOST}" != "localhost" ] && [ "${MARIADB_HOST}" != "127.0.0.1" ]; then
+if [ "${MARIADB_HOST}" != "localhost" ] && [ "${MARIADB_HOST}" != "127.0.0.1" ] && [ "${MARIADB_HOST}" != "::1" ]; then
     IS_REMOTE=true
 fi
 

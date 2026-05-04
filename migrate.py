@@ -143,7 +143,9 @@ def establish_db_connections(sqlite_db_path, mysql_config):
             DB["sqlite_cursor"].close()
         if DB["sqlite_conn"]:
             DB["sqlite_conn"].close()
-        sys.exit(f"Error connecting to MySQL: {e}")
+        sanitized = str(e).replace(MARIADB_PASSWORD, "***") if MARIADB_PASSWORD else str(e)
+        print(f"Error connecting to MySQL: {sanitized}")
+        sys.exit(1)
 
     try:
         DB["mysql_cursor"].execute("SET FOREIGN_KEY_CHECKS = 0;")
@@ -372,10 +374,11 @@ def copy_rows(table_name, escaped_table_name):
                         f"Error inserting data into `{table_name}` "
                         f"(batch {i // batch_size}, starting row {i}): {err}")
                     continue
-                sys.exit(
+                print(
                     f"Fatal: failed to insert batch {i // batch_size} "
                     f"(starting row {i}) into `{table_name}`: {err}\n"
                     f"Set IGNORE_INSERT_ERRORS=1 to skip failed rows instead.")
+                sys.exit(1)
 
         print(
             f"Successfully processed {successful_batches} batches out of "
