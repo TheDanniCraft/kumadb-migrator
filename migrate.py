@@ -12,8 +12,13 @@ import sys
 from typing import Optional
 import mysql.connector
 
-MARIADB_USER = getenv("MARIADB_USER", "kuma")  ## database user
-MARIADB_PASSWORD = getenv("MARIADB_PASSWORD", "secret")  ### password
+MARIADB_USER = getenv("MARIADB_USER", "kuma")
+MARIADB_PASSWORD = getenv("MARIADB_PASSWORD", "secret")
+MARIADB_HOST = getenv("MARIADB_HOST", "localhost")
+MARIADB_PORT = int(getenv("MARIADB_PORT", "3306"))
+MARIADB_DATABASE = getenv("MARIADB_DATABASE", "kumadb")
+IGNORE_INSERT_ERRORS = getenv("IGNORE_INSERT_ERRORS", "0") == "1"
+DRY_RUN = getenv("DRY_RUN", "0") == "1"
 
 DB: dict[str, Optional[object]] = {
     "sqlite_conn": None,
@@ -129,7 +134,10 @@ def establish_db_connections(sqlite_db_path, mysql_config):
     try:
         DB["mysql_conn"] = mysql.connector.connect(**mysql_config)
         DB["mysql_cursor"] = DB["mysql_conn"].cursor()
-        print("Connected to MySQL database: kumadb")
+        print(
+            f"Connected to MariaDB/MySQL: "
+            f"{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}"
+        )
     except mysql.connector.Error as e:
         if DB["sqlite_cursor"]:
             DB["sqlite_cursor"].close()
@@ -341,14 +349,15 @@ def copy_rows(table_name, escaped_table_name):
             rows = knex_timestamp_conversion(rows)
 
         placeholders = ','.join(['%s'] * len(original_col_names))
-        # Use INSERT IGNORE to skip duplicate key errors and continue processing
-        insert_stmt = (f"INSERT IGNORE INTO {escaped_table_name} "
+        insert_keyword = "INSERT IGNORE" if IGNORE_INSERT_ERRORS else "INSERT"
+        insert_stmt = (f"{insert_keyword} INTO {escaped_table_name} "
                        f"({','.join(f'`{col}`' for col in original_col_names)}) "
                        f"VALUES ({placeholders})")
         print(f"Copying {len(rows)} rows to `{table_name}` using: {insert_stmt}")
 
         batch_size = 1000
         successful_batches = 0
+        total_batches = (len(rows) + batch_size - 1) // batch_size
         for i in range(0, len(rows), batch_size):
             batch = rows[i:i + batch_size]
 
@@ -357,17 +366,20 @@ def copy_rows(table_name, escaped_table_name):
                 DB["mysql_conn"].commit()
                 successful_batches += 1
             except mysql.connector.Error as err:
-                print(
-                    f"Error inserting data into `{table_name}` "
-                    f"(batch {i // batch_size}, starting row {i}): {err}")
                 DB["mysql_conn"].rollback()
-                # Continue with next batch instead of breaking
-                continue
+                if IGNORE_INSERT_ERRORS:
+                    print(
+                        f"Error inserting data into `{table_name}` "
+                        f"(batch {i // batch_size}, starting row {i}): {err}")
+                    continue
+                sys.exit(
+                    f"Fatal: failed to insert batch {i // batch_size} "
+                    f"(starting row {i}) into `{table_name}`: {err}\n"
+                    f"Set IGNORE_INSERT_ERRORS=1 to skip failed rows instead.")
 
         print(
             f"Successfully processed {successful_batches} batches out of "
-            f"{(len(rows) + batch_size - 1) // batch_size} for table "
-            f"`{table_name}`")
+            f"{total_batches} for table `{table_name}`")
         print(f"Data copied to `{table_name}`.")
     else:
         print(f"No data to copy for table `{table_name}`.")
@@ -457,15 +469,55 @@ def migrate_sqlite_to_mysql(sqlite_db_path, mysql_config):
     """
     Migrates a SQLite database to MySQL, including table schemas and data.
     """
-    establish_db_connections(sqlite_db_path,mysql_config)
+    establish_db_connections(sqlite_db_path, mysql_config)
+
+    row_counts: dict[str, tuple[int, int]] = {}  # table -> (sqlite_count, mysql_count)
 
     try:
         DB["sqlite_cursor"].execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = DB["sqlite_cursor"].fetchall()
         print(f"Found tables in SQLite: {[t[0] for t in tables]}")
 
+        if DRY_RUN:
+            print("\n==> DRY_RUN=1: connectivity OK, listing source tables only. No data migrated.")
+            for table_name_tuple in tables:
+                tname = table_name_tuple[0]
+                DB["sqlite_cursor"].execute(f"SELECT COUNT(*) FROM `{tname}`")
+                count = DB["sqlite_cursor"].fetchone()[0]
+                print(f"  {tname}: {count} rows")
+            return
+
         for table_name_tuple in tables:
-            migrate_table(table_name_tuple[0])  # table_name_tuple[0] is the table name
+            migrate_table(table_name_tuple[0])
+
+        # Row-count verification
+        print("\n==> Row-count verification")
+        print(f"{'Table':<40} {'SQLite':>10} {'MariaDB':>10} {'Match':>6}")
+        print("-" * 70)
+        all_match = True
+        for table_name_tuple in tables:
+            tname = table_name_tuple[0]
+            if tname == 'sqlite_sequence' or tname.startswith('sqlite_autoindex_'):
+                continue
+            try:
+                DB["sqlite_cursor"].execute(f"SELECT COUNT(*) FROM `{tname}`")
+                src_count = DB["sqlite_cursor"].fetchone()[0]
+                DB["mysql_cursor"].execute(f"SELECT COUNT(*) FROM `{tname}`")
+                dst_count = DB["mysql_cursor"].fetchone()[0]
+                match = "✓" if src_count == dst_count else "✗"
+                if src_count != dst_count:
+                    all_match = False
+                row_counts[tname] = (src_count, dst_count)
+                print(f"{tname:<40} {src_count:>10} {dst_count:>10} {match:>6}")
+            except (sqlite3.Error, mysql.connector.Error) as err:
+                print(f"{tname:<40} {'ERROR':>10} {'ERROR':>10} {'?':>6}  ({err})")
+                all_match = False
+        print("-" * 70)
+        if all_match:
+            print("All row counts match.")
+        else:
+            print("WARNING: Some row counts do not match. Review the output above.")
+
     # pylint: disable=broad-exception-caught
     except Exception as e:
         print(f"An unexpected error occurred during migration: {e}")
@@ -493,12 +545,13 @@ def migrate_sqlite_to_mysql(sqlite_db_path, mysql_config):
 
 
 # --- Configuration ---
-SQLITE_DB = 'kuma.db'  ## database file of sqlite
+SQLITE_DB = '/app/kuma.db'
 mysql_connection_config = {
-    'host': "localhost",  ## change to remote mysql host
-    'user': MARIADB_USER,  ## database user
-    'password': MARIADB_PASSWORD,  ### password
-    'database': "kumadb"  ## database name
+    'host': MARIADB_HOST,
+    'port': MARIADB_PORT,
+    'user': MARIADB_USER,
+    'password': MARIADB_PASSWORD,
+    'database': MARIADB_DATABASE,
 }
 
 # --- Run the migration ---
