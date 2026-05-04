@@ -105,7 +105,7 @@ else
         -u"${MARIADB_USER}" -p"${MARIADB_PASSWORD}" \
         -e "CREATE DATABASE IF NOT EXISTS \`${MARIADB_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
         2>/dev/null \
-        || echo "Note: Could not CREATE DATABASE (may already exist or insufficient privileges — this is OK if the database already exists)."
+        || echo "Note: Could not CREATE DATABASE (may already exist or insufficient privileges - this is OK if the database already exists)."
 
     # Safety check: refuse non-empty destination database unless FORCE=1
     if [ "${FORCE}" != "1" ]; then

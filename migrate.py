@@ -46,6 +46,10 @@ BLOB_TYPES = ("BLOB",)
 INDEXED_VARCHAR_MAX = 191
 DEFAULT_VARCHAR_MAX = 255
 
+# SQLite-internal tables that should not be migrated to MariaDB
+SQLITE_INTERNAL_TABLES = ('sqlite_sequence',)
+SQLITE_INTERNAL_PREFIXES = ('sqlite_autoindex_',)
+
 def map_integer_type(sqlite_type_upper: str) -> str | None:
     """Map integer-like types."""
     for key, mysql_type in INTEGER_TYPES.items():
@@ -134,10 +138,7 @@ def establish_db_connections(sqlite_db_path, mysql_config):
     try:
         DB["mysql_conn"] = mysql.connector.connect(**mysql_config)
         DB["mysql_cursor"] = DB["mysql_conn"].cursor()
-        print(
-            f"Connected to MariaDB/MySQL: "
-            f"{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}"
-        )
+        print(f"Connected to MariaDB/MySQL: {MARIADB_HOST}:{MARIADB_PORT}/{MARIADB_DATABASE}")
     except mysql.connector.Error as e:
         if DB["sqlite_cursor"]:
             DB["sqlite_cursor"].close()
@@ -390,11 +391,10 @@ def copy_rows(table_name, escaped_table_name):
 
 def migrate_table(table_name):
     """ Run migration for table `table_name`. """
-    if table_name == 'sqlite_sequence':
+    if table_name in SQLITE_INTERNAL_TABLES or any(
+        table_name.startswith(p) for p in SQLITE_INTERNAL_PREFIXES
+    ):
         print(f"Skipping internal SQLite table: {table_name}")
-        return
-    if table_name.startswith('sqlite_autoindex_'):
-        print(f"Skipping internal SQLite autoindex table: {table_name}")
         return
 
     print(f"\nProcessing table: `{table_name}`")
@@ -500,7 +500,9 @@ def migrate_sqlite_to_mysql(sqlite_db_path, mysql_config):
         all_match = True
         for table_name_tuple in tables:
             tname = table_name_tuple[0]
-            if tname == 'sqlite_sequence' or tname.startswith('sqlite_autoindex_'):
+            if tname in SQLITE_INTERNAL_TABLES or any(
+                tname.startswith(p) for p in SQLITE_INTERNAL_PREFIXES
+            ):
                 continue
             try:
                 DB["sqlite_cursor"].execute(f"SELECT COUNT(*) FROM `{tname}`")
