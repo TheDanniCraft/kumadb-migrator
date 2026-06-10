@@ -12,11 +12,11 @@ import sys
 from typing import Optional
 import mysql.connector
 
-MARIADB_USER = getenv("MARIADB_USER", "kuma")
+MARIADB_USER = str(getenv("MARIADB_USER", "kuma")).strip()
 MARIADB_PASSWORD = getenv("MARIADB_PASSWORD", "secret")
-MARIADB_HOST = getenv("MARIADB_HOST", "localhost")
-MARIADB_PORT = int(getenv("MARIADB_PORT", "3306"))
-MARIADB_DATABASE = getenv("MARIADB_DATABASE", "kumadb")
+MARIADB_HOST = str(getenv("MARIADB_HOST", "localhost")).strip()
+MARIADB_PORT = int(str(getenv("MARIADB_PORT", "3306")).strip())
+MARIADB_DATABASE = str(getenv("MARIADB_DATABASE", "kumadb")).strip()
 SQLITE_DB_PATH = getenv("SQLITE_DB", "/app/kuma.db")
 IGNORE_INSERT_ERRORS = getenv("IGNORE_INSERT_ERRORS", "0") == "1"
 DRY_RUN = getenv("DRY_RUN", "0") == "1"
@@ -136,10 +136,36 @@ def establish_db_connections(sqlite_db_path, mysql_config):
     except sqlite3.Error as e:
         sys.exit(f"Error connecting to SQLite: {e}")
 
+    host = str(mysql_config.get("host", "")).strip()
+    port = int(mysql_config.get("port", 3306))
+    user = str(mysql_config.get("user", "")).strip()
+    database = str(mysql_config.get("database", "")).strip()
+    use_pure = bool(mysql_config.get("use_pure", True))
+    print(
+        "MySQL connect params: "
+        f"host={host!r}, port={port}, user={user!r}, database={database!r}, use_pure={use_pure}"
+    )
+    if not host:
+        sys.exit("Error connecting to MySQL: empty host after parsing environment variables.")
+
+    connect_config = dict(mysql_config)
+    connect_config["host"] = host
+    connect_config["port"] = port
+    connect_config["use_pure"] = use_pure
+    # Explicitly prevent implicit local UNIX socket usage.
+    connect_config.pop("unix_socket", None)
+
     try:
-        DB["mysql_conn"] = mysql.connector.connect(**mysql_config)
+        DB["mysql_conn"] = mysql.connector.connect(**connect_config)
         DB["mysql_cursor"] = DB["mysql_conn"].cursor()
-        print(f"Connected to MariaDB/MySQL: {MARIADB_HOST}:{MARIADB_PORT}/{MARIADB_DATABASE}")
+        print(f"Connected to MariaDB/MySQL: {host}:{port}/{database}")
+        DB["mysql_cursor"].execute("SELECT USER(), CURRENT_USER(), @@hostname, @@port;")
+        conn_identity = DB["mysql_cursor"].fetchone()
+        print(
+            "MariaDB identity: "
+            f"USER()={conn_identity[0]}, CURRENT_USER()={conn_identity[1]}, "
+            f"@@hostname={conn_identity[2]}, @@port={conn_identity[3]}"
+        )
     except mysql.connector.Error as e:
         if DB["sqlite_cursor"]:
             DB["sqlite_cursor"].close()
@@ -567,6 +593,7 @@ mysql_connection_config = {
     'user': MARIADB_USER,
     'password': MARIADB_PASSWORD,
     'database': MARIADB_DATABASE,
+    'use_pure': True,
 }
 
 # --- Run the migration ---
